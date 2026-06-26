@@ -67,5 +67,5 @@ Parameterised branch scorecard (`@ReportMonth`) with RAG colour formatting on CE
 ```
 ## About
 
-**Richard Danfro** — Customer Insights & Analytics, Consolidated Bank Ghana. 10+ years in CX measurement, survey research, and feedback automation; built independently to extend Power BI/SQL/Python skills into SQL Server BI.
+**Richard Danfro** — Customer Insights & Analytics Professional. Expert in CX measurement, survey research, and feedback automation.
 [LinkedIn](https://www.linkedin.com/in/richard-danfro/)
