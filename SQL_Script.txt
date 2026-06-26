@@ -1,0 +1,191 @@
+
+Script 1 of 4 — Insert 10 branches
+
+USE BranchCX_Intelligence;
+GO
+
+INSERT INTO dbo.Branches
+    (branch_code, branch_name, region, rem_name, rem_email)
+VALUES
+    ('ACC-001', 'Accra Central',     'Greater Accra', 'Kwame Asante',    'k.asante@cbg.com.gh'),
+    ('ACC-002', 'Osu Oxford Street',  'Greater Accra', 'Kwame Asante',    'k.asante@cbg.com.gh'),
+    ('ACC-003', 'Tema Community 1',   'Greater Accra', 'Kwame Asante',    'k.asante@cbg.com.gh'),
+    ('KSI-001', 'Kumasi Adum',        'Ashanti',        'Abena Mensah',    'a.mensah@cbg.com.gh'),
+    ('KSI-002', 'Kumasi Asafo',       'Ashanti',        'Abena Mensah',    'a.mensah@cbg.com.gh'),
+    ('KSI-003', 'Obuasi Branch',      'Ashanti',        'Abena Mensah',    'a.mensah@cbg.com.gh'),
+    ('TAK-001', 'Takoradi Harbour',   'Western',        'Kofi Boateng',    'k.boateng@cbg.com.gh'),
+    ('TAK-002', 'Sekondi Branch',     'Western',        'Kofi Boateng',    'k.boateng@cbg.com.gh'),
+    ('TEM-001', 'Tamale Central',     'Northern',       'Fatima Ibrahim', 'f.ibrahim@cbg.com.gh'),
+    ('TEM-002', 'Bolgatanga Branch',  'Northern',       'Fatima Ibrahim', 'f.ibrahim@cbg.com.gh');
+
+SELECT * FROM dbo.Branches;
+
+Script 2 of 4 — Generate 1000+ complaints (12 months, realistic patterns)
+
+-- This script uses a loop to generate realistic complaint data
+-- ACC-002 and TEM-001 are intentionally high-complaint branches
+DECLARE @month DATE = '2024-01-01';
+DECLARE @branch NVARCHAR(10);
+DECLARE @i INT;
+DECLARE @complaints INT;
+DECLARE @cat NVARCHAR(50);
+DECLARE @chan NVARCHAR(30);
+
+-- Complaint volumes per branch per month (realistic — high-volume branches built in)
+CREATE TABLE #BranchVolumes (branch_code NVARCHAR(10), monthly_avg INT);
+INSERT INTO #BranchVolumes VALUES
+    ('ACC-001', 12), ('ACC-002', 28), ('ACC-003', 8),
+    ('KSI-001', 15), ('KSI-002', 6),  ('KSI-003', 4),
+    ('TAK-001', 10), ('TAK-002', 5),
+    ('TEM-001', 22), ('TEM-002', 7);
+
+WHILE @month <= '2024-12-01'
+BEGIN
+    DECLARE branch_cur CURSOR FOR
+        SELECT branch_code, monthly_avg FROM #BranchVolumes;
+    OPEN branch_cur;
+    FETCH NEXT FROM branch_cur INTO @branch, @complaints;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @i = 1;
+        -- Add slight monthly variation (+/- 3 complaints)
+        SET @complaints = @complaints + (ABS(CHECKSUM(NEWID())) % 7) - 3;
+
+        WHILE @i <= @complaints
+        BEGIN
+            -- Rotate through realistic complaint categories
+            SET @cat = CASE (ABS(CHECKSUM(NEWID())) % 5)
+                WHEN 0 THEN 'ATM/Card Services'
+                WHEN 1 THEN 'Account Management'
+                WHEN 2 THEN 'Long Wait Times'
+                WHEN 3 THEN 'Staff Conduct'
+                ELSE        'Mobile Banking'
+            END;
+            SET @chan = CASE (ABS(CHECKSUM(NEWID())) % 3)
+                WHEN 0 THEN 'Branch'
+                WHEN 1 THEN 'Contact Centre'
+                ELSE        'Digital'
+            END;
+            INSERT INTO dbo.CustomerComplaints
+                (branch_code, complaint_date, category, channel, resolved_flag, resolved_date)
+            VALUES (
+                @branch,
+                DATEADD(DAY, ABS(CHECKSUM(NEWID())) % 28, @month),
+                @cat, @chan,
+                CASE WHEN ABS(CHECKSUM(NEWID())) % 10 > 2 THEN 1 ELSE 0 END,
+                CASE WHEN ABS(CHECKSUM(NEWID())) % 10 > 2
+                    THEN DATEADD(DAY, ABS(CHECKSUM(NEWID())) % 14 + 1, @month)
+                    ELSE NULL
+                END
+            );
+            SET @i = @i + 1;
+        END
+        FETCH NEXT FROM branch_cur INTO @branch, @complaints;
+    END
+    CLOSE branch_cur; DEALLOCATE branch_cur;
+    SET @month = DATEADD(MONTH, 1, @month);
+END
+DROP TABLE #BranchVolumes;
+
+-- Verify: expect 600–750 rows
+SELECT COUNT(*) AS total_complaints FROM dbo.CustomerComplaints;
+
+Script 3 of 4 — Generate 1,200 survey responses (NPS + CES)
+
+-- KSI-001 and KSI-002 built with high NPS, ACC-002 built with low NPS
+-- This gives the queries interesting results to find
+DECLARE @m DATE = '2024-01-01';
+DECLARE @b NVARCHAR(10);
+DECLARE @j INT;
+DECLARE @nps_bias INT;
+DECLARE @ces_base DECIMAL(3,1);
+
+CREATE TABLE #BranchBias (
+    branch_code NVARCHAR(10),
+    nps_bias INT,        -- higher = more promoters
+    ces_base DECIMAL(3,1) -- base CES score for this branch
+);
+INSERT INTO #BranchBias VALUES
+    ('ACC-001', 6, 3.8), ('ACC-002', 3, 2.9), ('ACC-003', 7, 4.1),
+    ('KSI-001', 8, 4.4), ('KSI-002', 8, 4.5), ('KSI-003', 6, 3.6),
+    ('TAK-001', 5, 3.4), ('TAK-002', 7, 4.0),
+    ('TEM-001', 4, 2.7), ('TEM-002', 6, 3.5);
+
+WHILE @m <= '2024-12-01'
+BEGIN
+    DECLARE sc CURSOR FOR
+        SELECT branch_code, nps_bias, ces_base FROM #BranchBias;
+    OPEN sc;
+    FETCH NEXT FROM sc INTO @b, @nps_bias, @ces_base;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @j = 1;
+        WHILE @j <= 10  -- 10 responses per branch per month = 1,200 total
+        BEGIN
+            INSERT INTO dbo.PulseSurveys
+                (branch_code, survey_date, survey_month, customer_rating, ces_score, channel)
+            VALUES (
+                @b,
+                DATEADD(DAY, ABS(CHECKSUM(NEWID())) % 28, @m),
+                @m,
+                -- NPS rating: weighted by branch bias (better branches get more 9-10s)
+                CASE
+                    WHEN ABS(CHECKSUM(NEWID())) % 10 < @nps_bias THEN
+                        9 + (ABS(CHECKSUM(NEWID())) % 2)  -- promoter (9-10)
+                    WHEN ABS(CHECKSUM(NEWID())) % 10 > 7 THEN
+                        1 + (ABS(CHECKSUM(NEWID())) % 6)  -- detractor (1-6)
+                    ELSE
+                        7 + (ABS(CHECKSUM(NEWID())) % 2)  -- passive (7-8)
+                END,
+                -- CES: base score +/- small random variation each month
+                ROUND(CAST(@ces_base AS FLOAT)
+                    + (ABS(CHECKSUM(NEWID())) % 21 - 10) / 20.0, 1),
+                CASE (ABS(CHECKSUM(NEWID())) % 3)
+                    WHEN 0 THEN 'Branch'
+                    WHEN 1 THEN 'Digital'
+                    ELSE        'Contact Centre'
+                END
+            );
+            SET @j = @j + 1;
+        END
+        FETCH NEXT FROM sc INTO @b, @nps_bias, @ces_base;
+    END
+    CLOSE sc; DEALLOCATE sc;
+    SET @m = DATEADD(MONTH, 1, @m);
+END
+DROP TABLE #BranchBias;
+
+-- Verify: should return 1,200 rows
+SELECT COUNT(*) AS total_surveys FROM dbo.PulseSurveys;
+
+Script 4 of 4 — Generate 120 monthly deposit records
+
+-- 10 branches × 12 months = 120 deposit records
+-- ACC-001 is the highest-volume branch intentionally
+DECLARE @dm DATE = '2024-01-01';
+WHILE @dm <= '2024-12-01'
+BEGIN
+    INSERT INTO dbo.BranchDeposits (branch_code, deposit_month, deposit_amount, product_type)
+    VALUES
+    ('ACC-001',@dm, 4200000+(ABS(CHECKSUM(NEWID()))%500000), 'Current Account'),
+    ('ACC-002',@dm, 3100000+(ABS(CHECKSUM(NEWID()))%400000), 'Savings Account'),
+    ('ACC-003',@dm, 2800000+(ABS(CHECKSUM(NEWID()))%300000), 'Fixed Deposit'),
+    ('KSI-001',@dm, 3500000+(ABS(CHECKSUM(NEWID()))%400000), 'Current Account'),
+    ('KSI-002',@dm, 2200000+(ABS(CHECKSUM(NEWID()))%300000), 'Savings Account'),
+    ('KSI-003',@dm, 1800000+(ABS(CHECKSUM(NEWID()))%200000), 'Fixed Deposit'),
+    ('TAK-001',@dm, 2600000+(ABS(CHECKSUM(NEWID()))%300000), 'Current Account'),
+    ('TAK-002',@dm, 1500000+(ABS(CHECKSUM(NEWID()))%200000), 'Savings Account'),
+    ('TEM-001',@dm, 1900000+(ABS(CHECKSUM(NEWID()))%200000), 'Current Account'),
+    ('TEM-002',@dm, 1200000+(ABS(CHECKSUM(NEWID()))%150000), 'Savings Account');
+    SET @dm = DATEADD(MONTH,1,@dm);
+END
+
+-- Final verification: all 4 tables populated
+SELECT 'Branches'          AS tbl, COUNT(*) AS rows FROM dbo.Branches
+UNION ALL
+SELECT 'Complaints',       COUNT(*) FROM dbo.CustomerComplaints
+UNION ALL
+SELECT 'Surveys',          COUNT(*) FROM dbo.PulseSurveys
+UNION ALL
+SELECT 'Deposits',         COUNT(*) FROM dbo.BranchDeposits;
